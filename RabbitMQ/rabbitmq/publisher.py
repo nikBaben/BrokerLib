@@ -6,6 +6,7 @@ from aio_pika.abc import (
     HeadersType,
 )
 
+from rabbitmq.names import QueueName, RoutingKey
 from rabbitmq.schemas import Event
 
 
@@ -30,7 +31,7 @@ class RabbitMQPublisher:
         self,
         event: Event,
         *,
-        routing_key: str,
+        routing_key: RoutingKey,
         delivery_mode: DeliveryMode | None = None,
         mandatory: bool | None = None,
         timeout: float | None = None,
@@ -39,7 +40,7 @@ class RabbitMQPublisher:
         content_encoding: str | None = "utf-8",
         priority: int | None = None,
         correlation_id: str | None = None,
-        reply_to: str | None = None,
+        reply_to: QueueName | None = None,
         expiration: DateType = None,
         message_id: str | None = None,
         timestamp: DateType = None,
@@ -54,6 +55,11 @@ class RabbitMQPublisher:
         берёт значение из события; timeout=None берёт таймаут из publisher.
         content_encoding описывает тело, но не меняет кодировку UTF-8 JSON.
         """
+        if not isinstance(routing_key, RoutingKey):
+            raise TypeError("routing_key должен быть элементом RoutingKey")
+        if reply_to is not None and not isinstance(reply_to, QueueName):
+            raise TypeError("reply_to должен быть элементом QueueName")
+
         # Сначала выбираем значения по умолчанию, затем собираем сообщение.
         if delivery_mode is None:
             delivery_mode = self._delivery_mode
@@ -72,7 +78,7 @@ class RabbitMQPublisher:
             delivery_mode=delivery_mode,
             priority=priority,
             correlation_id=correlation_id,
-            reply_to=reply_to,
+            reply_to=reply_to.value if reply_to is not None else None,
             expiration=expiration,
             message_id=message_id,
             timestamp=timestamp,
@@ -92,7 +98,7 @@ class RabbitMQPublisher:
         self,
         message: AbstractMessage,
         *,
-        routing_key: str,
+        routing_key: RoutingKey,
         mandatory: bool | None = None,
         timeout: float | None = None,
     ) -> None:
@@ -102,6 +108,9 @@ class RabbitMQPublisher:
         Ошибки публикации передаются вызывающему коду как исключения.
         None в timeout использует таймаут, заданный при создании publisher.
         """
+        if not isinstance(routing_key, RoutingKey):
+            raise TypeError("routing_key должен быть элементом RoutingKey")
+
         if mandatory is None:
             mandatory = self._mandatory
         if timeout is None:
@@ -109,7 +118,7 @@ class RabbitMQPublisher:
 
         await self._exchange.publish(
             message,
-            routing_key=routing_key,
+            routing_key=routing_key.value,
             mandatory=mandatory,
             timeout=timeout,
         )

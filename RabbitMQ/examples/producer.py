@@ -5,6 +5,7 @@ import asyncio
 from aio_pika import ExchangeType
 
 from examples.events import OrderCreated
+from examples.names import Exchanges, RoutingKeys
 from rabbitmq.config import RabbitMQSettings
 from rabbitmq.connection import RabbitMQConnection
 from rabbitmq.publisher import RabbitMQPublisher
@@ -22,7 +23,7 @@ async def main() -> None:
 
         exchange = await declare_exchange(
             channel,
-            "orders.events",
+            Exchanges.ORDERS,
             exchange_type=ExchangeType.TOPIC,
             durable=True,
         )
@@ -36,7 +37,7 @@ async def main() -> None:
 
         await publisher.publish(
             event,
-            routing_key="order.created",
+            routing_key=RoutingKeys.ORDER_CREATED,
             headers={"source": "orders-service"},
             correlation_id=str(event.event_id),
             app_id="brokerlib-example",

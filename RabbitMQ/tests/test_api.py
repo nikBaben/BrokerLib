@@ -2,6 +2,7 @@
 
 import asyncio
 import unittest
+from typing import cast
 from unittest.mock import AsyncMock, create_autospec, patch
 
 from aio_pika import DeliveryMode, Message
@@ -18,9 +19,28 @@ from pydantic_settings import SettingsConfigDict
 from rabbitmq.config import RabbitMQSettings
 from rabbitmq.connection import RabbitMQConnection
 from rabbitmq.consumer import RabbitMQConsumer
+from rabbitmq.names import ExchangeName, QueueName, RoutingKey
 from rabbitmq.publisher import RabbitMQPublisher
 from rabbitmq.schemas import Event
 from rabbitmq.topology import bind_exchange, bind_queue, declare_exchange, declare_queue
+
+
+class Exchanges(ExchangeName):
+    EVENTS = "events"
+    SOURCE = "source"
+    FALLBACK = "fallback"
+    DEFAULT = ""
+
+
+class Queues(QueueName):
+    ORDERS = "orders"
+    REPLY = "reply"
+
+
+class RoutingKeys(RoutingKey):
+    CREATED = "created"
+    RAW = "raw"
+    ORDERS = "orders.#"
 
 
 class TestSettings(RabbitMQSettings):
@@ -113,7 +133,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
         channel = create_autospec(AbstractRobustChannel, instance=True)
         await declare_queue(
             channel,
-            "orders",
+            Queues.ORDERS,
             durable=False,
             exclusive=True,
             auto_delete=True,
@@ -122,7 +142,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
             queue_type="classic",
             message_ttl=0,
             max_length=100,
-            dead_letter_exchange="",
+            dead_letter_exchange=Exchanges.DEFAULT,
             single_active_consumer=False,
             arguments={"custom-extension": "value"},
         )
@@ -147,7 +167,7 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
         channel = create_autospec(AbstractRobustChannel, instance=True)
         with self.assertRaisesRegex(ValueError, "x-message-ttl"):
             await declare_queue(
-                channel, "orders", message_ttl=5, arguments={"x-message-ttl": 10}
+                channel, Queues.ORDERS, message_ttl=5, arguments={"x-message-ttl": 10}
             )
         channel.declare_queue.assert_not_awaited()
 
@@ -155,10 +175,10 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
         channel = create_autospec(AbstractRobustChannel, instance=True)
         await declare_exchange(
             channel,
-            "events",
+            Exchanges.EVENTS,
             exchange_type="x-delayed-message",
             delayed_type="topic",
-            alternate_exchange="fallback",
+            alternate_exchange=Exchanges.FALLBACK,
             internal=True,
             passive=True,
             robust=False,
@@ -173,11 +193,17 @@ class TopologyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(options["passive"])
         queue = create_autospec(AbstractRobustQueue, instance=True)
         await bind_queue(
-            queue, "events", arguments={"x-match": "all"}, robust=False, timeout=3
+            queue,
+            Exchanges.EVENTS,
+            arguments={"x-match": "all"},
+            robust=False,
+            timeout=3,
         )
         self.assertEqual(queue.bind.call_args.kwargs["arguments"], {"x-match": "all"})
         destination = create_autospec(AbstractRobustExchange, instance=True)
-        await bind_exchange(destination, "source", routing_key="orders.#", robust=False)
+        await bind_exchange(
+            destination, Exchanges.SOURCE, routing_key=RoutingKeys.ORDERS, robust=False
+        )
         self.assertEqual(destination.bind.call_args.args, ("source",))
 
 
@@ -188,14 +214,14 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         event = Order(order_id=123)
         await publisher.publish(
             event,
-            routing_key="created",
+            routing_key=RoutingKeys.CREATED,
             mandatory=False,
             timeout=None,
             delivery_mode=DeliveryMode.NOT_PERSISTENT,
             headers={"trace": "abc"},
             priority=5,
             correlation_id="request-1",
-            reply_to="reply",
+            reply_to=Queues.REPLY,
             expiration=2.5,
             message_id="custom",
             timestamp=None,
@@ -223,14 +249,14 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         exchange = create_autospec(AbstractExchange, instance=True)
         publisher = RabbitMQPublisher(exchange, timeout=10)
         event = Order(order_id=1)
-        await publisher.publish(event, routing_key="created")
+        await publisher.publish(event, routing_key=RoutingKeys.CREATED)
         message = exchange.publish.call_args.args[0]
         self.assertEqual(message.message_id, str(event.event_id))
         self.assertEqual(message.timestamp, event.occurred_at)
         self.assertEqual(message.type, "Order")
         self.assertEqual(exchange.publish.call_args.kwargs["timeout"], 10)
         raw = Message(b"not-json", content_type="application/octet-stream")
-        await publisher.publish_message(raw, routing_key="raw", timeout=None)
+        await publisher.publish_message(raw, routing_key=RoutingKeys.RAW, timeout=None)
         self.assertIs(exchange.publish.call_args.args[0], raw)
         self.assertEqual(exchange.publish.call_args.kwargs["timeout"], 10)
 
@@ -238,10 +264,97 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         exchange = create_autospec(AbstractExchange, instance=True)
         publisher = RabbitMQPublisher(exchange, timeout=None)
         event = Order(order_id=1)
-        await publisher.publish(event, routing_key="created")
+        await publisher.publish(event, routing_key=RoutingKeys.CREATED)
         self.assertIsNone(exchange.publish.call_args.kwargs["timeout"])
-        await publisher.publish(event, routing_key="created", timeout=2)
+        await publisher.publish(event, routing_key=RoutingKeys.CREATED, timeout=2)
         self.assertEqual(exchange.publish.call_args.kwargs["timeout"], 2)
+
+
+class NameValidationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exchange_rejects_strings_and_other_categories(self) -> None:
+        channel = create_autospec(AbstractRobustChannel, instance=True)
+        for invalid in ("events", Queues.ORDERS, RoutingKeys.CREATED):
+            with (
+                self.subTest(value=invalid),
+                self.assertRaisesRegex(TypeError, "ExchangeName"),
+            ):
+                await declare_exchange(channel, cast(ExchangeName, invalid))
+        channel.declare_exchange.assert_not_awaited()
+
+    async def test_queue_rejects_strings_and_other_categories(self) -> None:
+        channel = create_autospec(AbstractRobustChannel, instance=True)
+        for invalid in ("orders", Exchanges.EVENTS, RoutingKeys.CREATED):
+            with (
+                self.subTest(value=invalid),
+                self.assertRaisesRegex(TypeError, "QueueName"),
+            ):
+                await declare_queue(channel, cast(QueueName, invalid))
+        channel.declare_queue.assert_not_awaited()
+
+    async def test_publisher_rejects_invalid_key_in_both_methods(self) -> None:
+        exchange = create_autospec(AbstractExchange, instance=True)
+        publisher = RabbitMQPublisher(exchange)
+        for invalid in ("created", Exchanges.EVENTS, Queues.ORDERS):
+            key = cast(RoutingKey, invalid)
+            with self.subTest(value=invalid):
+                with self.assertRaisesRegex(TypeError, "RoutingKey"):
+                    await publisher.publish(Order(order_id=1), routing_key=key)
+                with self.assertRaisesRegex(TypeError, "RoutingKey"):
+                    await publisher.publish_message(Message(b"data"), routing_key=key)
+        exchange.publish.assert_not_awaited()
+
+    async def test_bindings_reject_strings_and_wrong_categories(self) -> None:
+        queue = create_autospec(AbstractRobustQueue, instance=True)
+        destination = create_autospec(AbstractRobustExchange, instance=True)
+        with self.assertRaisesRegex(TypeError, "RoutingKey"):
+            await bind_queue(
+                queue, Exchanges.EVENTS, routing_key=cast(RoutingKey, "created")
+            )
+        with self.assertRaisesRegex(TypeError, "ExchangeName"):
+            await bind_queue(queue, cast(ExchangeName, "events"))
+        with self.assertRaisesRegex(TypeError, "RoutingKey"):
+            await bind_exchange(
+                destination,
+                Exchanges.SOURCE,
+                routing_key=cast(RoutingKey, Queues.ORDERS),
+            )
+        with self.assertRaisesRegex(TypeError, "ExchangeName"):
+            await bind_exchange(destination, cast(ExchangeName, "source"))
+        queue.bind.assert_not_awaited()
+        destination.bind.assert_not_awaited()
+
+    async def test_optional_names_are_checked_before_broker_calls(self) -> None:
+        channel = create_autospec(AbstractRobustChannel, instance=True)
+        with self.assertRaisesRegex(TypeError, "alternate_exchange"):
+            await declare_exchange(
+                channel,
+                Exchanges.EVENTS,
+                alternate_exchange=cast(ExchangeName, "fallback"),
+            )
+        with self.assertRaisesRegex(TypeError, "dead_letter_exchange"):
+            await declare_queue(
+                channel,
+                Queues.ORDERS,
+                dead_letter_exchange=cast(ExchangeName, Queues.REPLY),
+            )
+        with self.assertRaisesRegex(TypeError, "dead_letter_routing_key"):
+            await declare_queue(
+                channel, Queues.ORDERS, dead_letter_routing_key=cast(RoutingKey, "dead")
+            )
+        exchange = create_autospec(AbstractExchange, instance=True)
+        with self.assertRaisesRegex(TypeError, "reply_to"):
+            await RabbitMQPublisher(exchange).publish(
+                Order(order_id=1),
+                routing_key=RoutingKeys.CREATED,
+                reply_to=cast(QueueName, "reply"),
+            )
+        channel.declare_exchange.assert_not_awaited()
+        channel.declare_queue.assert_not_awaited()
+        exchange.publish.assert_not_awaited()
+
+    def test_unknown_enum_value_is_not_allowed(self) -> None:
+        with self.assertRaises(ValueError):
+            Exchanges("unknown")
 
 
 class ConsumerTests(unittest.IsolatedAsyncioTestCase):

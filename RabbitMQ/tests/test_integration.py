@@ -15,9 +15,24 @@ from aio_pika.exceptions import DeliveryError
 from rabbitmq.config import RabbitMQSettings
 from rabbitmq.connection import RabbitMQConnection
 from rabbitmq.consumer import RabbitMQConsumer
+from rabbitmq.names import ExchangeName, QueueName, RoutingKey
 from rabbitmq.publisher import RabbitMQPublisher
 from rabbitmq.schemas import Event
 from rabbitmq.topology import bind_queue, declare_exchange, declare_queue
+
+
+class Exchanges(ExchangeName):
+    DEFAULT = ""
+
+
+class Queues(QueueName):
+    REPLY = "reply-queue"
+
+
+class RoutingKeys(RoutingKey):
+    SAMPLE = "sample"
+    INVALID = "invalid"
+    UNBOUND = "unbound"
 
 
 class SampleEvent(Event):
@@ -36,9 +51,15 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         await self.connection.connect()
         self.addAsyncCleanup(self.connection.close)
         self.channel = await self.connection.create_channel(on_return_raises=True)
+
+        # Уникальный разрешённый exchange для каждого теста.
+        class TestExchanges(ExchangeName):
+            EVENTS = f"brokerlib.test.{uuid4().hex}"
+
+        self.exchange_name = TestExchanges.EVENTS
         self.exchange = await declare_exchange(
             self.channel,
-            f"brokerlib.test.{uuid4().hex}",
+            self.exchange_name,
             durable=False,
             auto_delete=True,
             timeout=5,
@@ -55,7 +76,9 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
             max_priority=5,
             timeout=5,
         )
-        await bind_queue(queue, self.exchange, routing_key="sample", timeout=5)
+        await bind_queue(
+            queue, self.exchange, routing_key=RoutingKeys.SAMPLE, timeout=5
+        )
         received_messages: asyncio.Queue[
             tuple[SampleEvent, AbstractIncomingMessage]
         ] = asyncio.Queue()
@@ -74,10 +97,10 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(consumer.stop)
         await RabbitMQPublisher(self.exchange).publish(
             event,
-            routing_key="sample",
+            routing_key=RoutingKeys.SAMPLE,
             headers={"trace": "integration"},
             correlation_id="request-42",
-            reply_to="reply-queue",
+            reply_to=Queues.REPLY,
             priority=3,
             expiration=30,
             message_type="sample.v1",
@@ -101,15 +124,21 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         dead = await declare_queue(
             self.channel, durable=False, exclusive=True, auto_delete=True
         )
+
+        # Автоматически сгенерированное имя очереди становится разрешённым ключом для default exchange.
+        class DeadLetterKeys(RoutingKey):
+            DEAD = dead.name
+
+        dead_letter_key = DeadLetterKeys.DEAD
         source = await declare_queue(
             self.channel,
             durable=False,
             exclusive=True,
             auto_delete=True,
-            dead_letter_exchange="",
-            dead_letter_routing_key=dead.name,
+            dead_letter_exchange=Exchanges.DEFAULT,
+            dead_letter_routing_key=dead_letter_key,
         )
-        await bind_queue(source, self.exchange, routing_key="invalid")
+        await bind_queue(source, self.exchange, routing_key=RoutingKeys.INVALID)
         invoked = False
 
         async def handler(event):
@@ -121,7 +150,7 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(consumer.stop)
         with self.assertLogs("rabbitmq.consumer", level="ERROR"):
             await RabbitMQPublisher(self.exchange).publish_message(
-                Message(b"not-json"), routing_key="invalid", timeout=5
+                Message(b"not-json"), routing_key=RoutingKeys.INVALID, timeout=5
             )
             async with asyncio.timeout(5):
                 while True:
@@ -137,7 +166,7 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
     async def test_mandatory_unroutable_message_fails(self) -> None:
         with self.assertRaises(DeliveryError):
             await RabbitMQPublisher(self.exchange).publish(
-                SampleEvent(value=1), routing_key="unbound", timeout=5
+                SampleEvent(value=1), routing_key=RoutingKeys.UNBOUND, timeout=5
             )
 
 

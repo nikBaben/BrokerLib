@@ -9,10 +9,12 @@ from aio_pika.abc import (
     HeadersType,
 )
 
+from rabbitmq.names import ExchangeName, QueueName, RoutingKey
+
 
 async def declare_exchange(
     channel: AbstractRobustChannel,
-    name: str,
+    name: ExchangeName,
     *,
     exchange_type: ExchangeType | str = ExchangeType.TOPIC,
     durable: bool = True,
@@ -22,7 +24,7 @@ async def declare_exchange(
     arguments: HeadersType | None = None,
     timeout: float | None = None,
     robust: bool = True,
-    alternate_exchange: str | None = None,
+    alternate_exchange: ExchangeName | None = None,
     delayed_type: str | None = None,
 ) -> AbstractRobustExchange:
     """Объявить exchange с указанными свойствами.
@@ -30,10 +32,19 @@ async def declare_exchange(
     passive=True проверяет существующий exchange, robust=True восстанавливает
     его при переподключении. delayed_type требует плагин delayed-message.
     """
+    if not isinstance(name, ExchangeName):
+        raise TypeError("name должен быть элементом ExchangeName")
+    if alternate_exchange is not None and not isinstance(
+        alternate_exchange, ExchangeName
+    ):
+        raise TypeError("alternate_exchange должен быть элементом ExchangeName")
+
     # Копия защищает словарь вызывающего кода от изменений.
     exchange_arguments = dict(arguments or {})
     named_arguments: HeadersType = {
-        "alternate-exchange": alternate_exchange,
+        "alternate-exchange": alternate_exchange.value
+        if alternate_exchange is not None
+        else None,
         "x-delayed-type": delayed_type,
     }
     for key, value in named_arguments.items():
@@ -46,7 +57,7 @@ async def declare_exchange(
         exchange_arguments[key] = value
 
     return await channel.declare_exchange(
-        name=name,
+        name=name.value,
         type=exchange_type,
         durable=durable,
         auto_delete=auto_delete,
@@ -60,7 +71,7 @@ async def declare_exchange(
 
 async def declare_queue(
     channel: AbstractRobustChannel,
-    name: str | None = None,
+    name: QueueName | None = None,
     *,
     durable: bool = True,
     exclusive: bool = False,
@@ -76,8 +87,8 @@ async def declare_queue(
     max_length_bytes: int | None = None,
     overflow: Literal["drop-head", "reject-publish", "reject-publish-dlx"]
     | None = None,
-    dead_letter_exchange: str | None = None,
-    dead_letter_routing_key: str | None = None,
+    dead_letter_exchange: ExchangeName | None = None,
+    dead_letter_routing_key: RoutingKey | None = None,
     max_priority: int | None = None,
     single_active_consumer: bool | None = None,
     delivery_limit: int | None = None,
@@ -88,6 +99,18 @@ async def declare_queue(
     от типа очереди. Дополнительные расширения передаются через arguments.
     Повтор одного ключа в arguments и именованных параметрах вызывает ValueError.
     """
+    # None оставляет возможность создать очередь с автоматически сгенерированным именем aio-pika.
+    if name is not None and not isinstance(name, QueueName):
+        raise TypeError("name должен быть элементом QueueName или None")
+    if dead_letter_exchange is not None and not isinstance(
+        dead_letter_exchange, ExchangeName
+    ):
+        raise TypeError("dead_letter_exchange должен быть элементом ExchangeName")
+    if dead_letter_routing_key is not None and not isinstance(
+        dead_letter_routing_key, RoutingKey
+    ):
+        raise TypeError("dead_letter_routing_key должен быть элементом RoutingKey")
+
     # Копия защищает словарь вызывающего кода от изменений.
     queue_arguments = dict(arguments or {})
     named_arguments: HeadersType = {
@@ -97,8 +120,12 @@ async def declare_queue(
         "x-max-length": max_length,
         "x-max-length-bytes": max_length_bytes,
         "x-overflow": overflow,
-        "x-dead-letter-exchange": dead_letter_exchange,
-        "x-dead-letter-routing-key": dead_letter_routing_key,
+        "x-dead-letter-exchange": dead_letter_exchange.value
+        if dead_letter_exchange is not None
+        else None,
+        "x-dead-letter-routing-key": dead_letter_routing_key.value
+        if dead_letter_routing_key is not None
+        else None,
         "x-max-priority": max_priority,
         "x-single-active-consumer": single_active_consumer,
         "x-delivery-limit": delivery_limit,
@@ -113,7 +140,7 @@ async def declare_queue(
         queue_arguments[key] = value
 
     return await channel.declare_queue(
-        name=name,
+        name=name.value if name is not None else None,
         durable=durable,
         exclusive=exclusive,
         passive=passive,
@@ -126,17 +153,28 @@ async def declare_queue(
 
 async def bind_queue(
     queue: AbstractRobustQueue,
-    exchange: AbstractExchange | str,
+    exchange: AbstractExchange | ExchangeName,
     *,
-    routing_key: str | None = None,
+    routing_key: RoutingKey | None = None,
     arguments: HeadersType | None = None,
     timeout: float | None = None,
     robust: bool = True,
 ) -> None:
     """Привязать очередь к exchange по routing_key и дополнительным условиям."""
+    if routing_key is not None and not isinstance(routing_key, RoutingKey):
+        raise TypeError("routing_key должен быть элементом RoutingKey или None")
+    if isinstance(exchange, ExchangeName):
+        exchange_value: AbstractExchange | str = exchange.value
+    elif not isinstance(exchange, AbstractExchange):
+        raise TypeError(
+            "exchange должен быть объектом exchange или элементом ExchangeName"
+        )
+    else:
+        exchange_value = exchange
+
     await queue.bind(
-        exchange,
-        routing_key=routing_key,
+        exchange_value,
+        routing_key=routing_key.value if routing_key is not None else None,
         arguments=arguments,
         timeout=timeout,
         robust=robust,
@@ -145,17 +183,28 @@ async def bind_queue(
 
 async def bind_exchange(
     destination: AbstractRobustExchange,
-    source: AbstractExchange | str,
+    source: AbstractExchange | ExchangeName,
     *,
-    routing_key: str = "",
+    routing_key: RoutingKey | None = None,
     arguments: HeadersType | None = None,
     timeout: float | None = None,
     robust: bool = True,
 ) -> None:
     """Привязать exchange-получатель к exchange-источнику."""
+    if routing_key is not None and not isinstance(routing_key, RoutingKey):
+        raise TypeError("routing_key должен быть элементом RoutingKey или None")
+    if isinstance(source, ExchangeName):
+        source_value: AbstractExchange | str = source.value
+    elif not isinstance(source, AbstractExchange):
+        raise TypeError(
+            "source должен быть объектом exchange или элементом ExchangeName"
+        )
+    else:
+        source_value = source
+
     await destination.bind(
-        source,
-        routing_key=routing_key,
+        source_value,
+        routing_key=routing_key.value if routing_key is not None else "",
         arguments=arguments,
         timeout=timeout,
         robust=robust,

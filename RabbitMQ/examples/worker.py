@@ -4,8 +4,10 @@ import asyncio
 import logging
 
 from aio_pika import ExchangeType
+from aio_pika.abc import AbstractIncomingMessage
 
 from examples.events import OrderCreated
+from examples.names import Exchanges, Queues, RoutingKeys
 from rabbitmq.config import RabbitMQSettings
 from rabbitmq.connection import RabbitMQConnection
 from rabbitmq.consumer import RabbitMQConsumer
@@ -16,11 +18,12 @@ logging.basicConfig(level=logging.INFO)
 
 async def handle_order_created(
     event: OrderCreated,
+    message: AbstractIncomingMessage,
 ) -> None:
-    print(f"Обработка заказа: {event.order_id}")
+    print(f"Заказ: {event.event_id}")
+    await asyncio.sleep(10)
 
-    await asyncio.sleep(1)
-
+    await message.ack()
     print(f"Заказ обработан: {event.event_id}")
 
 
@@ -34,33 +37,36 @@ async def main() -> None:
 
         exchange = await declare_exchange(
             channel,
-            "orders.events",
+            Exchanges.ORDERS,
             exchange_type=ExchangeType.TOPIC,
             durable=True,
         )
 
         queue = await declare_queue(
             channel,
-            "payments.orders",
+            Queues.PAYMENTS_ORDERS,
             durable=True,
+            max_length=5,
             queue_type="quorum",
+            overflow="reject-publish",
         )
 
         await bind_queue(
             queue,
             exchange,
-            routing_key="order.created",
+            routing_key=RoutingKeys.ORDER_CREATED,
         )
 
         consumer = RabbitMQConsumer(
             channel=channel,
             queue=queue,
             event_type=OrderCreated,
-            handler=handle_order_created,
+            auto_ack=False,
+            message_handler=handle_order_created,
         )
 
         await consumer.start(
-            prefetch_count=settings.prefetch_count,
+            prefetch_count=1,
         )
 
         print("Обработчик запущен. Ожидание сообщений...")

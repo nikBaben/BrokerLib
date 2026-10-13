@@ -3,6 +3,7 @@ from typing import Protocol
 from aio_pika import DeliveryMode
 from aio_pika.abc import DateType, HeadersType
 
+from rabbitmq.names import QueueName, RoutingKey
 from rabbitmq.schemas import Event
 
 
@@ -13,7 +14,7 @@ class EventPublisher(Protocol):
         self,
         event: Event,
         *,
-        routing_key: str,
+        routing_key: RoutingKey,
         delivery_mode: DeliveryMode | None = None,
         mandatory: bool | None = None,
         timeout: float | None = None,
@@ -22,7 +23,7 @@ class EventPublisher(Protocol):
         content_encoding: str | None = "utf-8",
         priority: int | None = None,
         correlation_id: str | None = None,
-        reply_to: str | None = None,
+        reply_to: QueueName | None = None,
         expiration: DateType = None,
         message_id: str | None = None,
         timestamp: DateType = None,
