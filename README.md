@@ -36,144 +36,466 @@ Worker создаёт очередь и привязку. Его нужно за
 
 Панель RabbitMQ: http://localhost:15672 (локальные учётные данные: `app` / `app_password`).
 
-## Импорты и VS Code
-
-Библиотека устанавливается Poetry как пакет `rabbitmq`:
-
-```python
-from rabbitmq.schemas import Event
-from rabbitmq.contracts import EventPublisher
-from rabbitmq.config import RabbitMQSettings
-from rabbitmq.connection import RabbitMQConnection
-from rabbitmq.consumer import RabbitMQConsumer
-from rabbitmq.publisher import RabbitMQPublisher
-```
-
-Откройте папку `BrokerLib` в VS Code. В локальной конфигурации задан интерпретатор `RabbitMQ/.venv/bin/python`; в Run and Debug доступны `RabbitMQ: worker` и `RabbitMQ: producer` с правильным рабочим каталогом. Если VS Code ранее запомнил другой интерпретатор, выполните **Python: Select Interpreter** и выберите `RabbitMQ/.venv/bin/python`.
-
-Для установки библиотеки в другое Python-окружение: `python -m pip install /путь/к/BrokerLib/RabbitMQ`. При использовании вне примеров задайте `RABBITMQ_URL` через окружение, `.env` в рабочем каталоге или `RabbitMQSettings(url=...)`.
-
 ## Использование в других проектах
 
-Установите библиотеку **в окружение того проекта**, где она нужна:
+Библиотеку можно установить в другой проект и использовать через импорты `from rabbitmq...`. Копировать её исходники в каждый сервис не нужно.
+
+### Установить библиотеку
+
+Открой терминал в своём проекте и активируй его виртуальное окружение. Затем укажи путь к папке `RabbitMQ`, где лежит `pyproject.toml`:
 
 ```sh
-python -m pip install /Users/baben/Desktop/RabbitMQLib/BrokerLib/RabbitMQ
-# Для разработки библиотеки с немедленным применением правок:
-python -m pip install -e /Users/baben/Desktop/RabbitMQLib/BrokerLib/RabbitMQ
-# Или в проекте с Poetry:
-poetry add /Users/baben/Desktop/RabbitMQLib/BrokerLib/RabbitMQ
+python -m pip install /путь/к/BrokerLib/RabbitMQ
 ```
 
-Либо выполните `poetry build` из `RabbitMQ` и установите полученный `.whl` из `RabbitMQ/dist` в другом проекте. Устанавливается только пакет `rabbitmq`: примеры не занимают общее имя `examples` в стороннем окружении. Внутри библиотеки используются абсолютные импорты `from rabbitmq.… import …`.
+Если проект использует Poetry:
 
-### Как читать исходный код
+```sh
+poetry add /путь/к/BrokerLib/RabbitMQ
+```
 
-Основной путь работы: `connection.py` открывает соединение и канал, `topology.py` объявляет очереди и привязки, `publisher.py` отправляет сообщение, `consumer.py` получает и обрабатывает его.
+Замени `/путь/к/BrokerLib/RabbitMQ` на свой путь. Пакет называется `rabbitmq-lib`, но в Python он импортируется как `rabbitmq`. Файлы примеров и тестов в установленный пакет не входят.
 
-- `config.py` — настройки из аргументов, окружения и `.env`, включая проверку значений.
-- `schemas.py` — базовая модель события с идентификатором и временем.
-- `contracts.py` — интерфейс отправителя для проверки типов.
-В отправителе значения по умолчанию выбираются обычными `if` до создания сообщения. В обработчике `_on_message` учитывает активные задачи для корректной остановки, а `_process_message` выполняет три шага: проверку формата, вызов вашего обработчика и подтверждение. Комментарии и описания методов написаны на русском; имена Python-методов и параметров оставлены английскими.
+Если ты одновременно меняешь библиотеку и проверяешь её в другом проекте, удобна установка в режиме разработки:
 
-### Явные параметры API
+```sh
+python -m pip install -e /путь/к/BrokerLib/RabbitMQ
+```
 
-В публичных методах библиотеки нет `**kwargs`. Параметры перечислены в сигнатурах и доступны через автодополнение.
+После такой установки изменения исходников библиотеки будут доступны без повторного `pip install`. Работающий процесс всё равно нужно перезапустить.
 
-| Область | Доступные настройки |
-| --- | --- |
-| Подключение | URL или host/port/login/password/virtualhost/ssl, heartbeat, connect_timeout, reconnect_interval, fail_fast, name, auth, interleave, happy_eyeballs_delay, SSLContext и файлы сертификатов, client_properties, loop, connection_class |
-| Канал | channel_number, publisher_confirms, on_return_raises |
-| Exchange | exchange_type, durable, auto_delete, internal, passive, timeout, robust, alternate_exchange, delayed_type, arguments |
-| Очередь | durable, exclusive, passive, auto_delete, timeout, robust, queue_type, message_ttl, expires, max_length, max_length_bytes, overflow, dead_letter_exchange, dead_letter_routing_key, max_priority, single_active_consumer, delivery_limit, arguments |
-| Привязка | routing_key, arguments, timeout, robust; доступны bind_queue и bind_exchange |
-| Публикация | delivery_mode, mandatory, timeout, headers, content_type, content_encoding, priority, correlation_id, reply_to, expiration, message_id, timestamp, message_type, user_id, app_id |
-| Потребление | prefetch_count, prefetch_size, global_, qos_timeout, no_ack, exclusive, priority, consumer_tag, timeout, robust, arguments |
-| Обработка и остановка | handler или message_handler, auto_ack, requeue_on_error, requeue_on_invalid; stop(timeout, cancel_timeout, nowait) |
+Для передачи готовой версии без исходной папки выполни `poetry build` из `RabbitMQ`. В `dist` появится файл `.whl`; его можно установить в окружение другого проекта через `python -m pip install /путь/к/файлу.whl`.
 
-`arguments` — именованный словарь расширений AMQP (`x-arguments`), а не произвольные Python-аргументы. Он оставлен для дополнительных параметров брокера и плагинов. Если один ключ указан и именованным параметром, и в `arguments`, библиотека выдаст `ValueError` до обращения к брокеру. Исходный словарь не изменяется. Разные типы очередей поддерживают разные наборы расширений; библиотека не скрывает ошибки совместимости, возвращённые RabbitMQ.
+### Задать свои события и имена
+
+События и названия очередей относятся к твоему приложению. Определи их в нём один раз и используй общие определения в producer и worker.
 
 ```python
+from rabbitmq.names import ExchangeName, QueueName, RoutingKey
+from rabbitmq.schemas import Event
+
+
+class Exchanges(ExchangeName):
+    ORDERS = "orders.events"
+
+
+class Queues(QueueName):
+    NOTIFICATIONS = "notifications.orders"
+
+
+class RoutingKeys(RoutingKey):
+    ORDER_CREATED = "order.created"
+
+
+class OrderCreated(Event):
+    order_id: int
+    user_id: int
+```
+
+`Event` добавляет каждому событию идентификатор `event_id` и время `occurred_at`. Остальные поля определяешь ты. Enum помогают producer и worker использовать одинаковые имена. Обычная строка или enum другой категории вызовут `TypeError` до обращения к RabbitMQ; передавать `.value` вручную не нужно.
+
+### Подключиться и отправить событие
+
+В рабочем каталоге приложения создай свой `.env`. Для локального RabbitMQ из этого репозитория достаточно:
+
+```dotenv
+RABBITMQ_URL=amqp://app:app_password@localhost:5672/
+```
+
+Следующий код использует определения из предыдущего примера. Exchange и очередь объявляются до отправки, чтобы у сообщения был подходящий маршрут:
+
+```python
+import asyncio
+
+from rabbitmq.config import RabbitMQSettings
+from rabbitmq.connection import RabbitMQConnection
+from rabbitmq.publisher import RabbitMQPublisher
 from rabbitmq.topology import bind_queue, declare_exchange, declare_queue
 
-# Внутри async-функции после создания channel:
-exchange = await declare_exchange(
-    channel,
-    "orders.events",
-    exchange_type="topic",
-    durable=True,
-    timeout=5,
-)
-queue = await declare_queue(
-    channel,
-    "billing.orders.v1",
-    queue_type="quorum",
-    durable=True,
-    message_ttl=60_000,
-    dead_letter_exchange="orders.dead",
-    dead_letter_routing_key="order.failed",
-    delivery_limit=5,
-    single_active_consumer=True,
-    timeout=5,
-)
-await bind_queue(queue, exchange, routing_key="order.created", timeout=5)
+
+async def main() -> None:
+    async with RabbitMQConnection(RabbitMQSettings()) as connection:
+        channel = await connection.create_channel(on_return_raises=True)
+        exchange = await declare_exchange(channel, Exchanges.ORDERS)
+        queue = await declare_queue(channel, Queues.NOTIFICATIONS)
+        await bind_queue(queue, exchange, routing_key=RoutingKeys.ORDER_CREATED)
+
+        publisher = RabbitMQPublisher(exchange)
+        event = OrderCreated(order_id=123, user_id=456)
+        await publisher.publish(event, routing_key=RoutingKeys.ORDER_CREATED)
+        print(f"Событие отправлено: {event.event_id}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-Для этой схемы отдельно объявите DLX `orders.dead`, очередь ошибок и её привязку. Повторное объявление существующей очереди с несовместимыми аргументами RabbitMQ отклоняет. Для изменения таких настроек используйте подходящую политику брокера или новую очередь.
+Сообщение останется в очереди, пока его не заберёт worker. Как создать обработчик и управлять подтверждениями, описано в разделе «Обработка сообщений» ниже.
 
-### Подключение и приоритет настроек
+## Явные параметры API
 
-`RabbitMQSettings` поддерживает `.env` и переменные `RABBITMQ_*`. Явные аргументы `RabbitMQConnection` переопределяют поля настроек; переданный объект настроек не изменяется.
+Здесь перечислены параметры, объявленные в самой библиотеке: настройки, конструкторы, методы и функции для работы с exchange и очередями. Внутренние методы consumer отмечены отдельно. Наследуемые возможности Pydantic и aio-pika описаны в их документации.
 
-```python
-from rabbitmq.connection import RabbitMQConnection
+В таблицах «Обязательный» означает, что аргумент нужно передать. `None` имеет разный смысл у разных параметров — он пояснён в соответствующей строке. `self` в таблицы не включён: Python передаёт его автоматически.
 
-# URL можно передать напрямую:
-connection = RabbitMQConnection(
-    url="amqp://app:app_password@localhost:5672/",
-    heartbeat=30,
-    connect_timeout=5,
-    reconnect_interval=2,
-    fail_fast=True,
-    name="billing-worker",
-)
+`HeadersType` — словарь AMQP-значений: строк, чисел, булевых значений и других поддерживаемых типов. Он используется для заголовков и дополнительных аргументов. `DateType` в установленной aio-pika объединяет `int`, `float`, `datetime`, `timedelta` и `None`; у TTL и времени сообщения смысл чисел различается.
 
-# Можно указать адрес раздельно — он заменит URL из настроек:
-connection = RabbitMQConnection(
-    host="localhost",
-    port=5672,
-    login="app",
-    password="app_password",
-    virtualhost="/",
-    heartbeat=30,
-)
-```
+### RabbitMQSettings — настройки приложения
 
-Явный аргумент `url` имеет приоритет над раздельными параметрами адреса. Если `url` не передан, но задан хотя бы один из host/port/login/password/virtualhost/ssl, используется раздельный адрес. Если не передано ни то, ни другое, адрес берётся из `RabbitMQSettings`. Значения heartbeat/reconnect_interval/fail_fast из настроек или явных аргументов имеют приоритет над одноимёнными query-параметрами URL. `connect_timeout=None` или пропущенный аргумент сохраняет таймаут из настроек. Чтобы отключить его, передайте `RabbitMQSettings(connect_timeout=None)`. При `fail_fast=False` первоначальное подключение может повторяться до успеха; для общего ограничения времени используйте `asyncio.timeout` вокруг `connect()`.
+Создаётся как `RabbitMQSettings(...)`. Настройки можно передать аргументами, записать в переменные окружения `RABBITMQ_*` или в `.env` рабочего каталога. Явный аргумент имеет преимущество перед окружением; окружение — перед `.env`; затем используется значение по умолчанию.
 
-Для TLS используйте URL `amqps://…` (либо `url=None, ssl=True, port=5671`) и `ssl_context` или явные `cafile`, `capath`, `cadata`, `certfile`, `keyfile`, `no_verify_ssl`. `cadata` ожидает base64-строку в формате aiormq. `auth="external"` требует соответствующей настройки брокера и клиентского сертификата.
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `url` | `str \| None` | `"amqp://guest:guest@localhost/"` | Адрес подключения целиком: схема, логин, пароль, сервер, порт и virtual host. При `url=None` адрес составляется из отдельных полей ниже. |
+| `host` | `str` | `"localhost"` | Адрес сервера при подключении без URL. |
+| `port` | `int` | `5672` | Порт сервера при подключении без URL. Допустимы значения от 1 до 65535. Для TLS обычно нужен 5671. |
+| `login` | `str` | `"guest"` | Пользователь RabbitMQ при подключении без URL. |
+| `password` | `str` | `"guest"` | Пароль пользователя при подключении без URL. Поле password исключено из строкового представления объекта настроек. |
+| `virtualhost` | `str` | `"/"` | Пространство RabbitMQ, в котором находятся exchange и очереди. У пользователя должны быть права на него. |
+| `ssl` | `bool` | `False` | Включить TLS при подключении без URL. Для URL режим задаётся схемой `amqps://`. |
+| `heartbeat` | `int` | `60` | Интервал проверки активности соединения в секундах. Значение неотрицательное; 0 отключает heartbeat клиента. |
+| `reconnect_interval` | `float` | `5` | Пауза в секундах между попытками восстановить оборванное соединение. Должна быть больше 0. |
+| `connect_timeout` | `float \| None` | `10` | Таймаут попытки подключения в секундах. Положительное число задаёт ограничение, `None` отключает его. |
+| `fail_fast` | `bool` | `True` | При `True` ошибка первой попытки подключения возвращается приложению. При `False` клиент продолжает попытки, поэтому запуск может ждать долго. |
+| `prefetch_count` | `int` | `10` | Значение, которое приложение может передать в `consumer.start(prefetch_count=settings.prefetch_count)`. Сам consumer этот объект настроек не читает. Значение неотрицательное; 0 не задаёт лимит со стороны клиента. |
 
-### Метаданные и подтверждения публикации
+Имя переменной окружения получается из имени поля: например, `RABBITMQ_HEARTBEAT` или `RABBITMQ_PREFETCH_COUNT`. Лишние ключи в `.env` игнорируются. Значения полей проверяются при создании объекта и при последующем присваивании.
 
-```python
-from rabbitmq.publisher import RabbitMQPublisher
+### RabbitMQConnection — соединение и каналы
 
-publisher = RabbitMQPublisher(exchange, mandatory=True, timeout=5)
-await publisher.publish(
-    event,
-    routing_key="order.created",
-    headers={"trace_id": "request-123"},
-    correlation_id="request-123",
-    reply_to="billing.replies",
-    expiration=30,  # секунды; message_ttl очереди задаётся в миллисекундах
-    app_id="orders-service",
-    timeout=2,  # таймаут этой публикации вместо 5 секунд по умолчанию
-)
-```
+Объект хранит настройки, открывает соединение через `connect()` и создаёт каналы. Его также можно использовать в `async with`: соединение откроется при входе и закроется при выходе.
 
-Пропущенный `timeout` и `timeout=None` используют значение, заданное при создании publisher. Чтобы отключить таймаут, создайте `RabbitMQPublisher(exchange, timeout=None)`. `message_id`, `timestamp`, `message_type` при значении `None` берутся из события. Чтобы отправить сообщение без этих метаданных, используйте `publish_message` с явно созданным `aio_pika.Message`. `publish` сериализует событие в UTF-8 JSON; поля content_type/content_encoding меняют метаданные. Для другого тела используйте `publish_message(aio_pika.Message(...), routing_key=...)`.
+#### RabbitMQConnection.__init__()
 
-Методы `publish` и `publish_message` возвращают `None`. Если подтверждения включены на канале, они дожидаются ответа брокера; ошибки публикации передаются как исключения. Для явного отказа при отсутствии маршрута создавайте канал с `publisher_confirms=True, on_return_raises=True` и публикуйте с `mandatory=True`. Подтверждение публикации не означает, что обработчик уже выполнил бизнес-операцию.
+Конструктор ещё не подключается к RabbitMQ. Переданный `settings` копируется, поэтому изменения внутри соединения не меняют исходный объект.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `settings` | `RabbitMQSettings \| None` | `None` | Объект настроек. При `None` библиотека создаёт `RabbitMQSettings()` и читает окружение и `.env`. |
+| `url` | `str \| None` | `None` | Явный URL подключения. Имеет преимущество перед раздельными параметрами адреса. При `None` URL берётся из settings, если не задан раздельный адрес. |
+| `host` | `str \| None` | `None` | Переопределить сервер. Если URL явно не передан, этот параметр включает сборку адреса из раздельных полей. |
+| `port` | `int \| None` | `None` | Переопределить порт. При раздельном адресе остальные поля наследуются из settings. |
+| `login` | `str \| None` | `None` | Переопределить пользователя для раздельного адреса. |
+| `password` | `str \| None` | `None` | Переопределить пароль для раздельного адреса. |
+| `virtualhost` | `str \| None` | `None` | Переопределить virtual host для раздельного адреса. |
+| `ssl` | `bool \| None` | `None` | Переопределить использование TLS для раздельного адреса. Порт автоматически на 5671 не меняется. |
+| `heartbeat` | `int \| None` | `None` | Переопределить интервал heartbeat в секундах. `None` сохраняет settings, 0 отключает heartbeat клиента. |
+| `reconnect_interval` | `float \| None` | `None` | Переопределить паузу между попытками восстановления соединения, в секундах. |
+| `connect_timeout` | `float \| None` | `None` | Переопределить таймаут попытки подключения, в секундах. `None` сохраняет settings; для отключения передай `RabbitMQSettings(connect_timeout=None)`. |
+| `fail_fast` | `bool \| None` | `None` | Переопределить поведение первой неудачной попытки. При `False` для ограничения общего времени ожидания можно использовать `asyncio.timeout()` вокруг `connect()`. |
+| `name` | `str \| None` | `None` | Читаемое имя подключения в панели RabbitMQ, например `payments-worker`. Не является именем exchange или очереди. |
+| `auth` | `Literal['plain', 'external'] \| None` | `None` | Механизм авторизации: `"plain"` для логина и пароля или `"external"` для внешней авторизации. `external` требует настройки брокера, обычно клиентского TLS-сертификата. `None` оставляет выбор aio-pika или URL. |
+| `interleave` | `int \| None` | `None` | Порядок перебора адресов IPv4/IPv6, если имя сервера разрешается в несколько адресов. Обычно можно оставить `None`. |
+| `happy_eyeballs_delay` | `float \| None` | `None` | Задержка в секундах перед параллельной попыткой подключения к следующему IP-адресу. Полезна при сочетании IPv4 и IPv6; обычно можно оставить `None`. |
+| `ssl_context` | `SSLContext \| None` | `None` | Готовый `SSLContext` с настройками TLS и доверенными сертификатами. Позволяет настроить TLS средствами Python. |
+| `cafile` | `str \| None` | `None` | Путь к файлу доверенных сертификатов CA для проверки сервера при TLS. |
+| `capath` | `str \| None` | `None` | Путь к каталогу доверенных сертификатов CA для проверки сервера при TLS. |
+| `cadata` | `str \| None` | `None` | Содержимое сертификатов CA в base64-строке: такой формат ожидает установленная aiormq. Альтернатива cafile/capath. |
+| `certfile` | `str \| None` | `None` | Путь к клиентскому сертификату, если сервер требует его при TLS. |
+| `keyfile` | `str \| None` | `None` | Путь к приватному ключу клиентского сертификата. |
+| `no_verify_ssl` | `bool \| None` | `None` | `True` отключает проверку сертификата сервера. Используется для диагностики TLS; обычное подключение должно проверять сертификат. `None` не переопределяет соответствующую настройку URL. |
+| `client_properties` | `HeadersType \| None` | `None` | Метаданные подключения для брокера, например `{"connection_name": "payments-worker"}`. Этот connection_name имеет преимущество перед параметром name. |
+| `loop` | `asyncio.AbstractEventLoop \| None` | `None` | Цикл событий asyncio. При `None` aio-pika использует текущий. Обычно передавать вручную не требуется. |
+| `connection_class` | `type[AbstractRobustConnection]` | `aio_pika.RobustConnection` | Класс соединения, которое создаст aio-pika. По умолчанию используется соединение с восстановлением; менять нужно только при собственной реализации. |
+
+Явный `url` задаёт адрес целиком. Если он не передан, но указан хотя бы один из `host`, `port`, `login`, `password`, `virtualhost`, `ssl`, библиотека отключает URL из settings и использует отдельные поля. Если ни один из них не передан, используется адрес из settings. Параметры `heartbeat`, `reconnect_interval`, `fail_fast` из settings или аргументов заменяют одноимённые значения в URL.
+
+#### RabbitMQConnection.connect()
+
+Без параметров. Открывает соединение; при повторном вызове использует уже открытое. Возвращает `None`. Ошибка подключения передаётся вызывающему коду.
+
+#### RabbitMQConnection.create_channel()
+
+Создаёт готовый к работе канал и возвращает `AbstractRobustChannel`. Перед вызовом нужно открыть соединение.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `publisher_confirms` | `bool` | `True` | Ждать подтверждения публикаций от RabbitMQ. Producer обычно использует `True`; для канала, который только получает сообщения, можно указать `False`. Не влияет на ack/nack consumer. |
+| `on_return_raises` | `bool` | `False` | Выбрасывать исключение, если обязательная публикация вернулась из-за отсутствия маршрута. Используй вместе с `publisher_confirms=True` и `mandatory=True` у publisher. |
+| `channel_number` | `int \| None` | `None` | Номер канала внутри соединения. При `None` его выбирает aio-pika; обычно номер вручную не нужен. |
+
+#### RabbitMQConnection.close()
+
+Без параметров. Закрывает соединение и его каналы. Повторный вызов после закрытия допустим. Возвращает `None`.
+
+#### Работа через async with
+
+`__aenter__()` вызывается Python при входе в `async with`, не принимает пользовательских аргументов, открывает соединение и возвращает сам объект `RabbitMQConnection`.
+
+`__aexit__()` вызывается при выходе и закрывает соединение. Исключения из тела `async with` не подавляются. Эти аргументы Python передаёт автоматически:
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `exc_type` | `type[BaseException] \| None` | Обязательный | Тип исключения из тела `async with`; `None`, если ошибки не было. |
+| `exc_value` | `BaseException \| None` | Обязательный | Сам объект исключения; `None`, если ошибки не было. |
+| `traceback` | `object` | Обязательный | Информация о стеке вызовов при ошибке. Закрытие соединения выполняется независимо от неё. |
+
+### RabbitMQPublisher — отправка сообщений
+
+Publisher связан с одним exchange. Метод `publish()` принимает событие и делает из него JSON; `publish_message()` отправляет готовый объект сообщения aio-pika.
+
+#### RabbitMQPublisher.__init__()
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `exchange` | `AbstractExchange` | Обязательный | Объявленный exchange, в который будут отправляться сообщения. Это объект aio-pika, а не его имя. |
+| `delivery_mode` | `DeliveryMode` | `DeliveryMode.PERSISTENT` | Режим хранения по умолчанию. `PERSISTENT` запрашивает сохранение сообщений; `NOT_PERSISTENT` — временные сообщения. Для сохранения после перезапуска учитываются также тип и durable очереди; quorum сохраняет сообщения независимо от этого поля. |
+| `mandatory` | `bool` | `True` | При `True` брокер возвращает сообщение, если ни одна очередь не подошла по маршруту. Для исключения при возврате включи on_return_raises на канале. |
+| `timeout` | `float \| None` | `None` | Таймаут публикаций по умолчанию, в секундах. `None` не задаёт ограничения. |
+
+#### RabbitMQPublisher.publish()
+
+Создаёт сообщение с телом в UTF-8 JSON. После завершения публикации возвращает `None`; ошибки не скрываются. Подтверждение брокера ожидается, если оно включено на канале. Оно не означает, что worker уже выполнил бизнес-операцию.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `event` | `Event` | Обязательный | Готовый объект Event или его наследника. Все поля конкретного события попадут в JSON. |
+| `routing_key` | `RoutingKey` | Обязательный | Элемент твоего enum RoutingKey, который определяет маршрут сообщения через exchange. Обычная строка не принимается. |
+| `delivery_mode` | `DeliveryMode \| None` | `None` | Режим хранения именно этого сообщения. `None` использует значение, заданное при создании publisher. |
+| `mandatory` | `bool \| None` | `None` | Переопределить проверку наличия подходящего маршрута для этой публикации. `None` использует настройку publisher. |
+| `timeout` | `float \| None` | `None` | Таймаут этой публикации, в секундах. `None` использует настройку publisher, а не отключает её. |
+| `headers` | `HeadersType \| None` | `None` | Дополнительные данные сообщения, например trace_id или версия схемы. Заголовки отделены от JSON-тела. |
+| `content_type` | `str \| None` | `'application/json'` | Описание формата тела. По умолчанию application/json. Изменение этого поля не меняет способ сериализации события. |
+| `content_encoding` | `str \| None` | `'utf-8'` | Описание кодировки тела. По умолчанию utf-8. Изменение метаданных не перекодирует JSON. |
+| `priority` | `int \| None` | `None` | Приоритет сообщения для очередей, которые его поддерживают. Более высокое значение означает более высокий приоритет. Не является приоритетом consumer. |
+| `correlation_id` | `str \| None` | `None` | Идентификатор для связывания запроса, ответа и логов, например ID операции. Сам RabbitMQ по этому полю не маршрутизирует. |
+| `reply_to` | `QueueName \| None` | `None` | Элемент QueueName с именем очереди для ответа. Это метаданные: очередь не создаётся и ответ автоматически не отправляется. |
+| `expiration` | `DateType` | `None` | Срок жизни именно этого сообщения. Число задаётся в секундах; можно передать timedelta или datetime. aio-pika переводит значение в формат TTL брокера. `None` не задаёт TTL сообщения. |
+| `message_id` | `str \| None` | `None` | Идентификатор сообщения. При `None` используется строковое значение event.event_id. Сам по себе не предотвращает повторную обработку. |
+| `timestamp` | `DateType` | `None` | Время сообщения. При `None` используется event.occurred_at. Можно передать datetime или другое значение DateType; число трактуется как время Unix в секундах. |
+| `message_type` | `str \| None` | `None` | Имя типа сообщения в метаданных. При `None` используется имя класса события, например OrderCreated. Consumer всё равно проверяет тело по переданному event_type. |
+| `user_id` | `str \| None` | `None` | Имя пользователя, публикующего сообщение. Если оно задано, брокер может проверить соответствие пользователю соединения. |
+| `app_id` | `str \| None` | `None` | Название приложения-отправителя для диагностики, например orders-service. На маршрутизацию не влияет. |
+
+Если нужны сообщения без автоматически добавляемых message_id/timestamp/type или с телом другого формата, создай `aio_pika.Message` самостоятельно и используй следующий метод.
+
+#### RabbitMQPublisher.publish_message()
+
+Отправляет уже собранное сообщение. Возвращает `None`, ожидает подтверждение при включённых publisher confirms и передаёт ошибки вызывающему коду.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `message` | `AbstractMessage` | Обязательный | Готовое сообщение aio-pika. Тело, заголовки, TTL, идентификаторы и другие свойства уже должны быть заданы в нём. |
+| `routing_key` | `RoutingKey` | Обязательный | Разрешённый ключ из твоего enum RoutingKey. Библиотека передаёт брокеру его строковое значение. |
+| `mandatory` | `bool \| None` | `None` | Переопределить проверку наличия маршрута. `None` сохраняет настройку publisher. |
+| `timeout` | `float \| None` | `None` | Таймаут публикации в секундах. `None` сохраняет настройку publisher. |
+
+### RabbitMQConsumer — получение и обработка событий
+
+Один объект подписывается на одну очередь. `event_type` задаёт модель для проверки JSON, а обработчик выполняет действия приложения. Тип `RabbitMQConsumer[EventT]` связывает модель события с типом аргумента обработчика.
+
+#### RabbitMQConsumer.__init__()
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `channel` | `AbstractRobustChannel` | Обязательный | Открытый канал aio-pika для настройки QoS и потребления сообщений. |
+| `queue` | `AbstractRobustQueue` | Обязательный | Объявленная очередь aio-pika, из которой нужно получать сообщения. |
+| `event_type` | `type[EventT]` | Обязательный | Класс события, наследующий Event, например OrderCreated. По нему Pydantic проверяет входящий JSON. |
+| `handler` | `EventHandler[EventT] \| None` | `None` | Асинхронная функция handler(event). Получает только событие. Нужно выбрать её или message_handler. |
+| `message_handler` | `MessageHandler[EventT] \| None` | `None` | Асинхронная функция message_handler(event, message). Дополнительно получает исходное сообщение: заголовки, ack, nack и reject. Не задаётся одновременно с handler. |
+| `auto_ack` | `bool` | `True` | После успешного обработчика автоматически отправлять ack. При `False` подтверждение валидного события принадлежит message_handler; такой режим требует message_handler. |
+| `requeue_on_error` | `bool` | `False` | При ошибке обработчика вернуть сообщение в очередь. Действует при auto_ack=True и no_ack=False. При ручном подтверждении решение принимает обработчик. Сам параметр не добавляет задержку или число попыток. |
+| `requeue_on_invalid` | `bool` | `False` | Вернуть в очередь сообщение с невалидным JSON или полями. Если `False`, оно отклоняется без возврата: идёт в настроенный DLX или удаляется. При no_ack=True отклонение невозможно. |
+
+#### RabbitMQConsumer.start()
+
+Настраивает QoS, подписывается на очередь и возвращает `None`. Объект должен быть создан с обработчиком. Повторный start во время работы или ожидания старых задач вызывает RuntimeError.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `prefetch_count` | `int` | `10` | Максимум неподтверждённых сообщений у этого consumer. 5 означает до пяти одновременно выданных сообщений, а не пять за всё время. 0 не задаёт лимит клиента; ограничения брокера сохраняются. С no_ack=True этот лимит не управляет числом активных обработчиков. |
+| `prefetch_size` | `int` | `0` | Поле AMQP для ограничения prefetch в байтах. RabbitMQ такой лимит не реализует; оставляй 0 и ограничивай количество через prefetch_count. |
+| `global_` | `bool` | `False` | Применять QoS ко всему каналу, а не к отдельному consumer. Обычно нужно False. Quorum-очереди не поддерживают глобальный QoS. |
+| `qos_timeout` | `float \| None` | `None` | Таймаут ответа на настройку QoS, в секундах. `None` не задаёт ограничения для этой операции. |
+| `no_ack` | `bool` | `False` | При `True` RabbitMQ не ждёт подтверждений обработки, а библиотека не вызывает ack/reject даже при ошибке. Для ручных ack/nack оставляй False. Нельзя сочетать True с auto_ack=False. |
+| `exclusive` | `bool` | `False` | Запросить единственного consumer на этой очереди. Это свойство подписки, а не exclusive самой очереди. Поддержка зависит от типа очереди. |
+| `arguments` | `HeadersType \| None` | `None` | Дополнительные параметры подписки, которые понимает брокер или его плагины. |
+| `priority` | `int \| None` | `None` | Приоритет этого consumer среди других читателей той же очереди. Передаётся как x-priority; более высокий приоритет получает преимущество, пока consumer способен принимать сообщения. Не является приоритетом сообщения. |
+| `consumer_tag` | `str \| None` | `None` | Идентификатор подписки внутри канала. Полезен для диагностики. При `None` его создаёт aio-pika. |
+| `timeout` | `float \| None` | `None` | Таймаут регистрации consumer на брокере, в секундах. Не ограничивает время выполнения обработчика. |
+| `robust` | `bool` | `True` | Восстанавливать эту подписку после переподключения. При False aio-pika не регистрирует её для восстановления. |
+
+`settings.prefetch_count` не подставляется в start автоматически. Если хочешь использовать его, передай явно: `await consumer.start(prefetch_count=settings.prefetch_count)`. В текущем worker примера пользователь может задать другой лимит напрямую.
+
+#### RabbitMQConsumer.stop()
+
+Отменяет подписку и ждёт активные обработчики. Возвращает `None`. Вызывать нужно из кода завершения приложения, вне обработчика сообщения.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `timeout` | `float \| None` | `30.0` | Сколько секунд ждать завершения уже запущенных обработчиков после отмены подписки. `None` ждёт без ограничения. При истечении времени возникает TimeoutError; сами обработчики не отменяются. |
+| `cancel_timeout` | `float \| None` | `None` | Таймаут ответа брокера об отмене подписки, в секундах. Это отдельное ожидание до ожидания обработчиков. |
+| `nowait` | `bool` | `False` | При True не ждать ответа брокера об отмене подписки. Для обычного завершения оставляй False. |
+
+После таймаута можно вызвать stop повторно. Закрытие канала или соединения позволяет брокеру вернуть неподтверждённые сообщения для повторной доставки.
+
+#### Внутренние методы consumer
+
+Эти методы вызывает сама библиотека. В приложении используй start, stop и свои обработчики.
+
+##### RabbitMQConsumer._on_message()
+
+Учитывает активную задачу, чтобы stop мог дождаться её. Возвращает None.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `message` | `AbstractIncomingMessage` | Обязательный | Входящее сообщение aio-pika, доставленное очередью. |
+
+##### RabbitMQConsumer._process_message()
+
+Проверяет JSON, вызывает выбранный обработчик и выполняет автоматическое подтверждение, если оно включено. Возвращает None.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `message` | `AbstractIncomingMessage` | Обязательный | Сообщение, тело которого нужно проверить по event_type и передать обработчику. |
+
+##### RabbitMQConsumer._reject_message()
+
+Отклоняет сообщение, если оно ещё не обработано и no_ack выключен. Возвращает None.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `message` | `AbstractIncomingMessage` | Обязательный | Входящее сообщение для отклонения. |
+| `requeue` | `bool` | Обязательный | True возвращает сообщение в очередь; False отправляет в настроенный DLX или удаляет. |
+
+### Функции для exchange, очередей и привязок
+
+Эти функции находятся в `rabbitmq.topology`. Они создают объекты aio-pika, которыми затем пользуются publisher и consumer.
+
+`arguments` позволяет передать расширения AMQP, в том числе параметры плагинов. Если один ключ задан и отдельным параметром, и в arguments, declare_exchange/declare_queue вызывают ValueError. То же происходит с priority и x-priority в consumer.start. Исходный словарь не меняется.
+
+#### declare_exchange()
+
+Объявляет exchange или проверяет уже существующий. Возвращает `AbstractRobustExchange`.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `channel` | `AbstractRobustChannel` | Обязательный | Канал, через который объявляется exchange. |
+| `name` | `ExchangeName` | Обязательный | Элемент ExchangeName с разрешённым именем. Обычная строка не принимается. |
+| `exchange_type` | `ExchangeType \| str` | `ExchangeType.TOPIC` | Способ маршрутизации: direct сравнивает ключ целиком, topic поддерживает шаблоны, fanout рассылает по всем привязкам, headers использует заголовки. Строка также позволяет указать тип плагина. |
+| `durable` | `bool` | `True` | Сохранять объявление exchange после перезапуска брокера. Не задаёт режим хранения сообщений. |
+| `auto_delete` | `bool` | `False` | Удалять exchange после удаления последней привязки, если у него уже были привязки. |
+| `internal` | `bool` | `False` | Exchange используется только для маршрутизации между exchange; публикация напрямую в него запрещена. |
+| `passive` | `bool` | `False` | Проверить существование exchange без создания. Если его нет, брокер вернёт ошибку и закроет канал. |
+| `arguments` | `HeadersType \| None` | `None` | Дополнительные свойства exchange для RabbitMQ или плагинов. |
+| `timeout` | `float \| None` | `None` | Таймаут объявления или проверки exchange, в секундах. None не задаёт ограничения. |
+| `robust` | `bool` | `True` | Регистрировать exchange для восстановления после переподключения. |
+| `alternate_exchange` | `ExchangeName \| None` | `None` | Элемент ExchangeName: exchange, куда передавать сообщения, не получившие маршрута в основном exchange. Его нужно объявить отдельно. |
+| `delayed_type` | `str \| None` | `None` | Базовый способ маршрутизации для exchange типа x-delayed-message, например topic. Требует установленного плагина delayed-message. |
+
+#### declare_queue()
+
+Объявляет очередь или проверяет уже существующую. Возвращает `AbstractRobustQueue`.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `channel` | `AbstractRobustChannel` | Обязательный | Канал, через который объявляется очередь. |
+| `name` | `QueueName \| None` | `None` | Элемент QueueName. При None RobustQueue из установленной aio-pika генерирует имя amq_ + UUID без дефисов; фактическое имя доступно в queue.name. |
+| `durable` | `bool` | `True` | Сохранять очередь после перезапуска брокера. Для долговечности сообщений также учитываются режим публикации и тип очереди. Quorum требует True. |
+| `exclusive` | `bool` | `False` | Очередь принадлежит одному соединению и удаляется при его закрытии. Обычно используется для временных очередей с durable=False. Quorum не поддерживает этот режим. |
+| `passive` | `bool` | `False` | Проверить существование очереди без создания. При её отсутствии брокер вернёт ошибку и закроет канал. |
+| `auto_delete` | `bool` | `False` | Удалить очередь после отключения последнего consumer, если consumer у неё уже был. Подходит для временных очередей. |
+| `arguments` | `HeadersType \| None` | `None` | Дополнительные параметры очереди в словаре AMQP. Для основных расширений ниже есть отдельные именованные параметры. |
+| `timeout` | `float \| None` | `None` | Таймаут объявления или проверки очереди, в секундах. None не задаёт ограничения. |
+| `robust` | `bool` | `True` | Регистрировать очередь для восстановления после переподключения. |
+| `queue_type` | `Literal['classic', 'quorum', 'stream'] \| None` | `None` | Тип очереди: classic, quorum или stream. None оставляет выбор настройки брокера. Доступные возможности различаются между типами; для stream обычно нужен отдельный Stream-клиент. |
+| `message_ttl` | `int \| None` | `None` | Срок жизни сообщений в этой очереди, в миллисекундах. Просроченные сообщения отправляются в настроенный DLX или удаляются. |
+| `expires` | `int \| None` | `None` | Удалить неиспользуемую очередь после указанного числа миллисекунд. Это срок жизни самой очереди, а не сообщений; точные правила обновления срока зависят от её типа. |
+| `max_length` | `int \| None` | `None` | Максимальное количество сообщений в состоянии Ready. Сообщения Unacked не считаются. При достижении лимита действует overflow. |
+| `max_length_bytes` | `int \| None` | `None` | Лимит суммарного размера тел сообщений Ready, в байтах. Не учитывает заголовки и накладные расходы. Если также задан max_length, действует первый достигнутый лимит. |
+| `overflow` | `Literal['drop-head', 'reject-publish', 'reject-publish-dlx'] \| None` | `None` | Поведение при переполнении. drop-head удаляет или отправляет в DLX старые сообщения; reject-publish отклоняет новые публикации; reject-publish-dlx также отправляет отклонённые публикации в DLX и не поддерживается quorum. None оставляет настройку брокера или политики, обычно drop-head. |
+| `dead_letter_exchange` | `ExchangeName \| None` | `None` | Элемент ExchangeName: exchange для сообщений, отклонённых без возврата, просроченных или удаляемых из-за лимита. Exchange и очередь ошибок нужно создать отдельно. Для default exchange можно объявить enum со значением пустой строки. |
+| `dead_letter_routing_key` | `RoutingKey \| None` | `None` | Элемент RoutingKey: ключ сообщения при отправке в DLX. Если не задан, используется исходный ключ по правилам RabbitMQ. |
+| `max_priority` | `int \| None` | `None` | Максимальный уровень приоритета classic-очереди, передаваемый как x-max-priority. Обычно достаточно нескольких уровней. У quorum правила приоритетов зависят от версии, а x-max-priority не управляет ими. |
+| `single_active_consumer` | `bool \| None` | `None` | Разрешать доставку только одному активному consumer, сохраняя остальные в ожидании. При его отключении брокер выбирает замену. True не подходит для распределения текущей нагрузки между всеми worker. |
+| `delivery_limit` | `int \| None` | `None` | Лимит неудачных повторных доставок для quorum-очереди. При превышении сообщение отправляется в DLX или удаляется. None оставляет значение брокера; это не лимит длины очереди. |
+
+Повторное объявление не изменяет параметры существующей очереди: несовместимые аргументы вызывают PRECONDITION_FAILED. Для изменения лимитов уже созданной очереди удобно применять политики RabbitMQ. У quorum с reject-publish возможно небольшое превышение лимита из-за публикаций в пути. Подробнее: [лимиты очередей](https://www.rabbitmq.com/docs/maxlength), [особенности quorum](https://www.rabbitmq.com/docs/quorum-queues).
+
+#### bind_queue()
+
+Создаёт маршрут из exchange в очередь. Возвращает `None`.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `queue` | `AbstractRobustQueue` | Обязательный | Объявленная очередь-получатель, объект aio-pika. |
+| `exchange` | `AbstractExchange \| ExchangeName` | Обязательный | Exchange-источник: его объект aio-pika или элемент ExchangeName. |
+| `routing_key` | `RoutingKey \| None` | `None` | Элемент RoutingKey с ключом или шаблоном привязки. При None aio-pika использует имя очереди. Шаблоны * и # имеют смысл для topic exchange. |
+| `arguments` | `HeadersType \| None` | `None` | Дополнительные условия привязки. Например, для headers exchange здесь задаются заголовки и x-match. |
+| `timeout` | `float \| None` | `None` | Таймаут создания привязки, в секундах. None не задаёт ограничения. |
+| `robust` | `bool` | `True` | Восстанавливать эту привязку после переподключения. |
+
+#### bind_exchange()
+
+Создаёт маршрут из одного exchange в другой. Сообщение проходит от source к destination. Возвращает `None`.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `destination` | `AbstractRobustExchange` | Обязательный | Exchange-получатель, объект AbstractRobustExchange. |
+| `source` | `AbstractExchange \| ExchangeName` | Обязательный | Exchange-источник: объект aio-pika или элемент ExchangeName. |
+| `routing_key` | `RoutingKey \| None` | `None` | Элемент RoutingKey с ключом или шаблоном привязки. При None используется пустая строка. |
+| `arguments` | `HeadersType \| None` | `None` | Дополнительные условия маршрутизации между exchange. |
+| `timeout` | `float \| None` | `None` | Таймаут создания привязки, в секундах. None не задаёт ограничения. |
+| `robust` | `bool` | `True` | Восстанавливать эту привязку после переподключения. |
+
+### Event — базовая модель события
+
+Создай свой класс, наследующий Event, и добавь поля приложения. При создании можно передать свои значения двух базовых полей или оставить автоматические.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `event_id` | `UUID` | Новый `uuid4()` | Идентификатор события для логов, сопоставления сообщений и собственной защиты от повторной обработки. Автоматическую дедупликацию RabbitMQ этим полем не включает. |
+| `occurred_at` | `datetime` | Текущее время UTC | Время возникновения события с часовым поясом. Publisher использует его как timestamp, если timestamp явно не задан. |
+
+Проверку полей и преобразование JSON выполняет Pydantic. Обычно в приложении достаточно создать событие через конструктор; consumer сам вызовет `model_validate_json`, а publisher — `model_dump_json`. Остальные наследуемые методы модели описаны в [документации Pydantic](https://docs.pydantic.dev/latest/concepts/models/).
+
+Функция `utc_now()` из `rabbitmq.schemas` не принимает параметров и возвращает текущее время UTC. Она используется для автоматического occurred_at.
+
+### ExchangeName, QueueName и RoutingKey — разрешённые имена
+
+В библиотеке это пустые StrEnum. Создай наследников и перечисли значения своего проекта, как в примере в начале README. Элемент enum можно передавать в методы библиотеки напрямую.
+
+| Класс | Для чего используется | Пример значения в наследнике |
+| --- | --- | --- |
+| `ExchangeName` | Имена exchange, alternate exchange и DLX | `ORDERS = "orders.events"` |
+| `QueueName` | Имена очередей и очереди ответа reply_to | `PAYMENTS = "payments.orders"` |
+| `RoutingKey` | Ключи публикаций, привязок и отправки в DLX | `ORDER_CREATED = "order.created"` или `ALL_ORDERS = "order.#"` |
+
+У этих классов нет собственного конструктора с настройками. После объявления конкретного enum можно получить его элемент по значению, например `Exchanges("orders.events")`:
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `value` | `str` | Обязательный | Найти уже объявленный элемент enum по его строковому значению. Неизвестное значение вызывает ValueError. |
+
+У элемента есть `name` — имя Python-константы, например ORDERS, и `value` — строка для RabbitMQ, например orders.events. Библиотека принимает всех наследников нужной категории. Она не привязана к единственному enum одного проекта.
+
+### EventPublisher — интерфейс отправителя
+
+Это Protocol для проверки типов. Он описывает, какие аргументы должен принимать отправитель, если твой код зависит от EventPublisher. Отдельно создавать экземпляр этого протокола не нужно: можно передать RabbitMQPublisher или свою реализацию с совместимым методом.
+
+#### EventPublisher.publish()
+
+Параметры интерфейса совпадают с RabbitMQPublisher.publish. Таблица повторена, чтобы весь контракт можно было прочитать здесь. Вызов возвращает None; сериализацию и отправку выполняет конкретная реализация.
+
+| Параметр | Тип | По умолчанию | Зачем нужен |
+| --- | --- | --- | --- |
+| `event` | `Event` | Обязательный | Готовый объект Event или его наследника. Все поля конкретного события попадут в JSON. |
+| `routing_key` | `RoutingKey` | Обязательный | Элемент твоего enum RoutingKey, который определяет маршрут сообщения через exchange. Обычная строка не принимается. |
+| `delivery_mode` | `DeliveryMode \| None` | `None` | Режим хранения именно этого сообщения. `None` использует значение, заданное при создании publisher. |
+| `mandatory` | `bool \| None` | `None` | Переопределить проверку наличия подходящего маршрута для этой публикации. `None` использует настройку publisher. |
+| `timeout` | `float \| None` | `None` | Таймаут этой публикации, в секундах. `None` использует настройку publisher, а не отключает её. |
+| `headers` | `HeadersType \| None` | `None` | Дополнительные данные сообщения, например trace_id или версия схемы. Заголовки отделены от JSON-тела. |
+| `content_type` | `str \| None` | `'application/json'` | Описание формата тела. По умолчанию application/json. Изменение этого поля не меняет способ сериализации события. |
+| `content_encoding` | `str \| None` | `'utf-8'` | Описание кодировки тела. По умолчанию utf-8. Изменение метаданных не перекодирует JSON. |
+| `priority` | `int \| None` | `None` | Приоритет сообщения для очередей, которые его поддерживают. Более высокое значение означает более высокий приоритет. Не является приоритетом consumer. |
+| `correlation_id` | `str \| None` | `None` | Идентификатор для связывания запроса, ответа и логов, например ID операции. Сам RabbitMQ по этому полю не маршрутизирует. |
+| `reply_to` | `QueueName \| None` | `None` | Элемент QueueName с именем очереди для ответа. Это метаданные: очередь не создаётся и ответ автоматически не отправляется. |
+| `expiration` | `DateType` | `None` | Срок жизни именно этого сообщения. Число задаётся в секундах; можно передать timedelta или datetime. aio-pika переводит значение в формат TTL брокера. `None` не задаёт TTL сообщения. |
+| `message_id` | `str \| None` | `None` | Идентификатор сообщения. При `None` используется строковое значение event.event_id. Сам по себе не предотвращает повторную обработку. |
+| `timestamp` | `DateType` | `None` | Время сообщения. При `None` используется event.occurred_at. Можно передать datetime или другое значение DateType; число трактуется как время Unix в секундах. |
+| `message_type` | `str \| None` | `None` | Имя типа сообщения в метаданных. При `None` используется имя класса события, например OrderCreated. Consumer всё равно проверяет тело по переданному event_type. |
+| `user_id` | `str \| None` | `None` | Имя пользователя, публикующего сообщение. Если оно задано, брокер может проверить соответствие пользователю соединения. |
+| `app_id` | `str \| None` | `None` | Название приложения-отправителя для диагностики, например orders-service. На маршрутизацию не влияет. |
 
 ### Обработка сообщений
 
@@ -207,23 +529,46 @@ await consumer.stop(timeout=30, cancel_timeout=5)
 
 `stop` отменяет подписку и ждёт выполняющиеся обработчики. При истечении `timeout` выбрасывается `TimeoutError`, обработчики не отменяются: можно повторить `stop`, либо закрыть канал/соединение, чтобы вернуть неподтверждённые сообщения. `nowait=True` не ждёт подтверждения отмены от брокера, поэтому для штатного завершения оставляйте `False`.
 
-### Границы библиотеки и проверки
+## Границы библиотеки и проверки
 
-В корне репозитория `pyrightconfig.json` задаёт стандартную проверку типов для библиотеки, примеров и тестов. Он указывает на окружение `RabbitMQ/.venv`. В VS Code также настроен запуск `unittest` из каталога `RabbitMQ`; интеграционные тесты без `BROKERLIB_INTEGRATION=1` пропускаются.
+### Что делает библиотека
 
+Она открывает соединение, помогает объявлять exchange и очереди, отправляет события в JSON и передаёт полученные события твоим обработчикам. Она также поддерживает проверку имён через enum, подтверждения и восстановление соединения средствами aio-pika.
 
-Возвращаемые channel/exchange/queue — объекты aio-pika: доступны исходные методы purge/delete/unbind/get, транзакции и другие операции. Настройки кластера, пользователей, политик, лимитов сервера и установка плагинов выполняются средствами RabbitMQ. Устаревший AMQP-флаг `immediate` не поддерживается RabbitMQ и не добавлен в обёртку.
+Бизнес-логику выполняет твой обработчик: например, сохраняет заказ, обращается к API или отправляет письмо. Решение о том, что делать после ошибки и когда повторять операцию, остаётся частью приложения. Библиотека не запускает дополнительные worker автоматически и не гарантирует, что бизнес-операция выполнится ровно один раз. При повторной доставке обработчик должен уметь безопасно работать с повтором.
 
-Документация протокола и клиента: [aio-pika API](https://docs.aio-pika.com/apidoc.html), [параметры подключения](https://docs.aio-pika.com/url-parameters.html), [аргументы очередей](https://www.rabbitmq.com/docs/queues).
+Полученные channel, exchange и queue — обычные объекты aio-pika. Если нужны операции вроде чтения одного сообщения, удаления привязки или очистки очереди, можно использовать их методы напрямую. Настройки пользователей, прав, политик, кластера и плагинов меняются на стороне RabbitMQ.
 
-Из каталога `RabbitMQ`:
+### Как проверить свою установку
+
+Все команды ниже запускаются из каталога `RabbitMQ`.
+
+Для проверок, которым не нужен работающий брокер:
 
 ```sh
-# Без брокера: интеграционные проверки будут пропущены.
 poetry run python -m unittest discover -s tests -v
+```
 
-# Полная проверка с локальным RabbitMQ из .env:
+Этот запуск проверяет логику библиотеки и допустимые типы имён. Проверки с настоящим RabbitMQ будут отмечены как пропущенные — это нормально для такого запуска.
+
+Для полного запуска сначала подними локальный RabbitMQ и проверь адрес в `.env`:
+
+```sh
+docker compose up -d --wait
 BROKERLIB_INTEGRATION=1 poetry run python -m unittest discover -s tests -v
 ```
 
-Интеграционные тесты создают временные очереди и уникальные exchanges, проверяют метаданные и ручной ack, отправку невалидного JSON в DLX и отказ при отсутствии маршрута. Они не читают прикладные очереди.
+Интеграционные тесты проверяют публикацию и получение события, метаданные, ручной ack, отправку невалидного сообщения в DLX и отказ при отсутствии маршрута. Они создают свои временные очереди и уникальные exchange, не читают прикладные очереди и удаляют свои объекты после завершения. Успешный результат unittest заканчивается строкой `OK`.
+
+Проверить описание пакета и собрать его для установки в другой проект можно так:
+
+```sh
+poetry check
+poetry build
+```
+
+Эти команды проверяют упаковку библиотеки; сами по себе они не проверяют подключение к RabbitMQ.
+
+### Где посмотреть детали
+
+Для дополнительных возможностей и ограничений пригодятся [API aio-pika](https://docs.aio-pika.com/apidoc.html), [документация RabbitMQ](https://www.rabbitmq.com/docs) и [модели Pydantic](https://docs.pydantic.dev/latest/concepts/models/). Параметры этой библиотеки сверяй с таблицами выше; поведение серверных возможностей также зависит от версии RabbitMQ.
