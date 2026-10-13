@@ -1,6 +1,6 @@
-# examples/events.py
+"""Пример события создания заказа."""
 
-from ..schemas import Event
+from rabbitmq.schemas import Event
 
 
 class OrderCreated(Event):

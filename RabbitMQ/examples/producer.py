@@ -1,14 +1,14 @@
-# examples/producer.py
+"""Отправка одного события: python -m examples.producer."""
 
 import asyncio
 
 from aio_pika import ExchangeType
 
+from examples.events import OrderCreated
 from rabbitmq.config import RabbitMQSettings
 from rabbitmq.connection import RabbitMQConnection
 from rabbitmq.publisher import RabbitMQPublisher
-
-from examples.events import OrderCreated
+from rabbitmq.topology import declare_exchange
 
 
 async def main() -> None:
@@ -20,9 +20,10 @@ async def main() -> None:
             on_return_raises=True,
         )
 
-        exchange = await channel.declare_exchange(
+        exchange = await declare_exchange(
+            channel,
             "orders.events",
-            type=ExchangeType.TOPIC,
+            exchange_type=ExchangeType.TOPIC,
             durable=True,
         )
 
@@ -36,9 +37,13 @@ async def main() -> None:
         await publisher.publish(
             event,
             routing_key="order.created",
+            headers={"source": "orders-service"},
+            correlation_id=str(event.event_id),
+            app_id="brokerlib-example",
+            timeout=5.0,
         )
 
-        print(f"Event published: {event.event_id}")
+        print(f"Событие отправлено: {event.event_id}")
 
 
 if __name__ == "__main__":
